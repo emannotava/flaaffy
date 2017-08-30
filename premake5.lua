@@ -20,7 +20,7 @@ workspace "flaaffy"
 		entrypoint "arookas.mareep"
 		targetname "mareep"
 		
-		links { "arookas", "System", "System.Xml", "System.Xml.Linq", }
+		links { "arookas", "System", "System.Core", "System.Xml", "System.Xml.Linq", }
 		
 		files {
 			"mareep/**.cs",
