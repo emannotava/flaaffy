@@ -175,6 +175,7 @@ namespace arookas {
 			Xml,
 			LittleBinary,
 			BigBinary,
+			SoundFont,
 
 		}
 

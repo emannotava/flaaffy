@@ -45,8 +45,10 @@ namespace arookas.whap {
 
 		public override void Perform() {
 			var chain = new Transformer<WaveBank>();
+			
+			string inputName = Path.GetFileName(mInputFile);
 
-			mareep.WriteMessage("Opening input file '{0}'...\n", Path.GetFileName(mInputFile));
+			mareep.WriteMessage("Opening input file '{0}'...\n", inputName);
 
 			using (var instream = mareep.OpenFile(mInputFile)) {
 				mareep.WriteMessage("Creating output file '{0}'...\n", Path.GetFileName(mOutputFile));
@@ -55,9 +57,9 @@ namespace arookas.whap {
 					mareep.WriteMessage("Linking deserializer...\n");
 
 					switch (mInputFormat) {
-						case IOFormat.Xml: chain.AppendLink(new XmlWaveBankDeserializer(CreateXmlInput(instream).Root)); break;
-						case IOFormat.LittleBinary: chain.AppendLink(new BinaryWaveBankDeserializer(CreateLittleBinaryInput(instream))); break;
-						case IOFormat.BigBinary: chain.AppendLink(new BinaryWaveBankDeserializer(CreateBigBinaryInput(instream))); break;
+						case IOFormat.Xml: chain.AppendLink(new XmlWaveBankDeserializer(CreateXmlInput(instream).Root, inputName)); break;
+						case IOFormat.LittleBinary: chain.AppendLink(new BinaryWaveBankDeserializer(CreateLittleBinaryInput(instream), inputName)); break;
+						case IOFormat.BigBinary: chain.AppendLink(new BinaryWaveBankDeserializer(CreateBigBinaryInput(instream), inputName)); break;
 					}
 
 					mareep.WriteMessage("Linking wave transferer...\n");
@@ -77,6 +79,7 @@ namespace arookas.whap {
 						case IOFormat.Xml: chain.AppendLink(new XmlWaveBankSerializer(CreateXmlOutput(outstream))); break;
 						case IOFormat.LittleBinary: chain.AppendLink(new BinaryWaveBankSerializer(CreateLittleBinaryOutput(outstream))); break;
 						case IOFormat.BigBinary: chain.AppendLink(new BinaryWaveBankSerializer(CreateBigBinaryOutput(outstream))); break;
+						case IOFormat.SoundFont: chain.AppendLink(new SoundFontWaveBankSerializer(CreateLittleBinaryOutput(outstream), inputDirectory)); break;
 					}
 
 					mareep.WriteMessage("Calling transform chain...\n");
@@ -107,9 +110,11 @@ namespace arookas {
 	class BinaryWaveBankDeserializer : BinaryWaveBankTransformer {
 
 		aBinaryReader mReader;
+		string mName;
 
-		public BinaryWaveBankDeserializer(aBinaryReader reader) {
+		public BinaryWaveBankDeserializer(aBinaryReader reader, string name) {
 			mReader = reader;
+			mName = name;
 		}
 
 		protected override WaveBank DoTransform(WaveBank obj) {
@@ -132,6 +137,7 @@ namespace arookas {
 			mareep.WriteMessage("WSYS: header found, size {0:F1} KB\n", ((double)size / 1024.0d));
 
 			var waveBank = new WaveBank();
+			waveBank.Name = mName;
 
 			mReader.Goto(winfOffset);
 
@@ -501,9 +507,11 @@ namespace arookas {
 	class XmlWaveBankDeserializer : XmlWaveBankTransformer {
 
 		xElement mRootElement;
+		string mName;
 
-		public XmlWaveBankDeserializer(xElement element) {
+		public XmlWaveBankDeserializer(xElement element, string name) {
 			mRootElement = element;
+			mName = name;
 		}
 
 		protected override WaveBank DoTransform(WaveBank obj) {
@@ -515,6 +523,14 @@ namespace arookas {
 		}
 		WaveBank LoadWaveBank(xElement xwavebank) {
 			var waveBank = new WaveBank();
+			
+			var xname = xwavebank.Attribute("name");
+			if (xname == null) {
+				waveBank.Name = mName;
+			}
+			else {
+				waveBank.Name = xname.Value;
+			}
 
 			foreach (var xwavegroup in xwavebank.Elements(cWaveGroup)) {
 				var waveGroup = LoadWaveGroup(xwavegroup);
@@ -673,6 +689,9 @@ namespace arookas {
 
 		void WriteWaveBank() {
 			mWriter.WriteStartElement(cWaveBank);
+			if (mWaveBank.Name.Length > 0) {
+				mWriter.WriteAttributeString("name", mWaveBank.Name);
+			}
 
 			foreach (var waveGroup in mWaveBank) {
 				WriteWaveGroup(waveGroup);
@@ -867,9 +886,10 @@ namespace arookas {
 			var mixer = new RawWaveMixer(new MemoryStream(data), wave.Format);
 			var dataSize = (wave.SampleCount * 2);
 			var sampleRate = (int)wave.SampleRate;
+			var numLoops = wave.Loop ? 1 : 0;
 			
 			writer.WriteString("RIFF");
-			writer.WriteS32(36 + dataSize);
+			writer.WriteS32(36 + dataSize + ((wave.Loop || wave.RootKey != 60) ? (36 + (numLoops * 24)) : 0));
 			writer.WriteString("WAVE");
 			writer.WriteString("fmt ");
 			writer.WriteS32(16);
@@ -879,6 +899,27 @@ namespace arookas {
 			writer.WriteS32(sampleRate * 2); // byte rate
 			writer.Write16(2); // block align
 			writer.Write16(16); // bit depth
+			if (wave.Loop || wave.RootKey != 60) {
+				writer.WriteString("smpl");
+				writer.WriteS32(36 + (numLoops * 24));
+				writer.WriteS32(0); // manufacturer
+				writer.WriteS32(0); // product
+				writer.WriteS32(1000000000/sampleRate); // sample period
+				writer.WriteS32(wave.RootKey); // unity note
+				writer.WriteS32(0); // pitch fraction
+				writer.WriteS32(0); // SMPTE format
+				writer.WriteS32(0); // SMPTE offset
+				writer.WriteS32(numLoops);
+				writer.WriteS32(0); // sampler data
+				if (wave.Loop) {
+					writer.WriteS32(0); // cue point ID
+					writer.WriteS32(0); // type
+					writer.WriteS32(wave.LoopStart);
+					writer.WriteS32(wave.LoopEnd-1);
+					writer.WriteS32(0); // fraction
+					writer.WriteS32(0); // play count
+				}
+			}
 			writer.WriteString("data");
 			writer.WriteS32(dataSize);
 			mixer.Write(WaveFormat.Pcm16, writer);
@@ -892,5 +933,207 @@ namespace arookas {
 		}
 
 	}
+	
+	abstract class SoundFontWaveBankTransformer : Transformer<WaveBank> {
+	}
 
+	class SoundFontWaveBankSerializer : SoundFontWaveBankTransformer {
+
+		aBinaryWriter mWriter;
+		WaveBank mWaveBank;
+		string mInputDirectory;
+
+		public SoundFontWaveBankSerializer(aBinaryWriter writer, string inputDirectory) {
+			mWriter = writer;
+			mInputDirectory = inputDirectory;
+		}
+
+		protected override WaveBank DoTransform(WaveBank obj) {
+			if (obj == null) {
+				return null;
+			}
+
+			mWaveBank = obj;
+
+			WriteWaveBank();
+
+			return mWaveBank;
+		}
+
+		void WriteWaveBank() {
+			mWriter.PushAnchor();
+
+			mWriter.WriteString("RIFF");
+			mWriter.WriteS32(CalculateInfoSize() + 8 + CalculateSmplSize() + 20 + CalculatePdtaSize() + 8 + 4);
+			mWriter.WriteString("sfbk");
+			
+			WriteInfo();
+			
+			WriteSdta();
+			
+			WritePdta();
+
+			mWriter.PopAnchor();
+		}
+		
+		void WriteInfo() {
+			mWriter.WriteString("LIST");
+			mWriter.WriteS32(CalculateInfoSize());
+			
+			mWriter.WriteString("INFO");
+			
+			mWriter.WriteString("ifil");
+			mWriter.WriteS32(4);
+			mWriter.WriteS16(2);
+			mWriter.WriteS16(1);
+			
+			mWriter.WriteString("isng");
+			mWriter.WriteS32(8);
+			mWriter.WriteString("EMU8000");
+			mWriter.WriteS8(0);
+			
+			mWriter.WriteString("INAM");
+			mWriter.WriteS32(((mWaveBank.Name.Length + 2) / 2) * 2);
+			mWriter.WriteString(mWaveBank.Name);
+			mWriter.WriteS8(0);
+			mWriter.WritePadding(2, 0);
+		}
+		
+		int CalculateInfoSize() {
+			return 4 + 12 + 16 + 8 + (((mWaveBank.Name.Length + 2) / 2) * 2);
+		}
+		
+		void WriteSdta() {
+			mWriter.WriteString("LIST");
+			mWriter.WriteS32(CalculateSmplSize() + 12);
+			
+			mWriter.WriteString("sdta");
+			
+			mWriter.WriteString("smpl");
+			mWriter.WriteS32(CalculateSmplSize());
+
+			foreach (var waveGroup in mWaveBank) {
+				var archiveFileName = Path.Combine(mInputDirectory, waveGroup.ArchiveFileName);
+
+				using (var instream = mareep.OpenFile(archiveFileName)) {
+					var reader = new aBinaryReader(instream, Endianness.Big);
+
+					mareep.WriteSeparator('-');
+					mareep.WriteMessage("{0} ({1} wave(s))\n", waveGroup.ArchiveFileName, waveGroup.Count);
+
+					foreach (var wave in waveGroup) {
+						reader.Goto(wave.WaveStart);
+						var data = reader.Read8s(wave.WaveSize);
+						var mixer = new RawWaveMixer(new MemoryStream(data), wave.Format);
+						mixer.Write(WaveFormat.Pcm16, mWriter);
+						
+						for (var i = 0; i < 92; i++) mWriter.WriteS8(0);
+					}
+				}
+			}
+		}
+		
+		int CalculateSmplSize() {
+			int sum = 0;
+			foreach (var waveGroup in mWaveBank) {
+				foreach (var wave in waveGroup) {
+					sum += wave.SampleCount * 2 + 92;
+				}
+			}
+			return sum;
+		}
+		
+		void WritePdta() {
+			mWriter.WriteString("LIST");
+			mWriter.WriteS32(CalculatePdtaSize());
+			
+			mWriter.WriteString("pdta");
+			
+			mWriter.WriteString("phdr");
+			mWriter.WriteS32(38);
+			mWriter.WriteString("EOP");
+			for (var i = 0; i < 35; i++) mWriter.WriteS8(0);
+			
+			mWriter.WriteString("pbag");
+			mWriter.WriteS32(4);
+			mWriter.WriteS16(0);
+			mWriter.WriteS16(0);
+			
+			mWriter.WriteString("pmod");
+			mWriter.WriteS32(10);
+			for (var i = 0; i < 10; i++) mWriter.WriteS8(0);
+			
+			mWriter.WriteString("pgen");
+			mWriter.WriteS32(4);
+			mWriter.WriteS32(0);
+			
+			mWriter.WriteString("inst");
+			mWriter.WriteS32(22);
+			mWriter.WriteString("EOI");
+			for (var i = 0; i < 19; i++) mWriter.WriteS8(0);
+			
+			mWriter.WriteString("ibag");
+			mWriter.WriteS32(4);
+			mWriter.WriteS16(0);
+			mWriter.WriteS16(0);
+			
+			mWriter.WriteString("imod");
+			mWriter.WriteS32(10);
+			for (var i = 0; i < 10; i++) mWriter.WriteS8(0);
+			
+			mWriter.WriteString("igen");
+			mWriter.WriteS32(4);
+			mWriter.WriteS32(0);
+			
+			mWriter.WriteString("shdr");
+			mWriter.WriteS32(CalculateShdrSize());
+			int runningSampleTotal = 0;
+			foreach (var waveGroup in mWaveBank) {
+				var archiveNoExtension = Path.GetFileNameWithoutExtension(waveGroup.ArchiveFileName);
+				if (archiveNoExtension.Length > 14) {
+					archiveNoExtension = archiveNoExtension.Substring(0, 14);
+				}
+
+				foreach (var wave in waveGroup) {
+					var waveFileName = String.Format("{0}_{1:D5}", archiveNoExtension, wave.WaveId);
+					
+					mWriter.WriteString(waveFileName);
+					for (var i = waveFileName.Length; i < 20; i++) mWriter.WriteS8(0);
+					
+					mWriter.WriteS32(runningSampleTotal);
+					mWriter.WriteS32(runningSampleTotal + wave.SampleCount);
+					if (wave.Loop) {
+						mWriter.WriteS32(runningSampleTotal + wave.LoopStart);
+						mWriter.WriteS32(runningSampleTotal + wave.LoopEnd);
+					}
+					else {
+						mWriter.WriteS32(runningSampleTotal);
+						mWriter.WriteS32(runningSampleTotal);
+					}
+					runningSampleTotal += wave.SampleCount + 46;
+					mWriter.WriteS32((int)wave.SampleRate);
+					mWriter.Write8((byte)wave.RootKey);
+					mWriter.WriteS8(0); // pitch correction
+					mWriter.WriteS16(0); // sample link
+					mWriter.WriteS16(1); // sample type
+				}
+			}
+			mWriter.WriteString("EOS");
+			for (var i = 0; i < 43; i++) mWriter.WriteS8(0);
+		}
+		
+		int CalculateShdrSize() {
+			int sum = 46;
+			foreach (var waveGroup in mWaveBank) {
+				sum += waveGroup.Count * 46;
+			}
+			return sum;
+		}
+		
+		int CalculatePdtaSize() {
+			return 4 + 46 + 12 + 18 + 12 + 30 + 12 + 18 + 12 + 8 + CalculateShdrSize();
+		}
+
+	}
+	
 }
