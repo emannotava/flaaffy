@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Xml;
+using System;
 
 namespace arookas.shock {
 
@@ -13,16 +14,19 @@ namespace arookas.shock {
 
 		public override void Perform() {
 			Transformer<InstrumentBank> chain = null;
-			mareep.WriteMessage("Opening input file '{0}'...\n", Path.GetFileName(mInputFile));
+			
+			string inputName = Path.GetFileName(mInputFile);
+			
+			mareep.WriteMessage("Opening input file '{0}'...\n", inputName);
 
 			using (var instream = mareep.OpenFile(mInputFile)) {
 				mareep.WriteMessage("Creating output file '{0}'...\n", Path.GetFileName(mOutputFile));
 
 				using (var outstream = mareep.CreateFile(mOutputFile)) {
 					switch (mInputFormat) {
-						case IOFormat.Xml: chain = new XmlBankDeserializer(CreateXmlInput(instream).Root); break;
-						case IOFormat.LittleBinary: chain = new BinaryBankDeserializer(CreateLittleBinaryInput(instream)); break;
-						case IOFormat.BigBinary: chain = new BinaryBankDeserializer(CreateBigBinaryInput(instream)); break;
+						case IOFormat.Xml: chain = new XmlBankDeserializer(CreateXmlInput(instream).Root, inputName); break;
+						case IOFormat.LittleBinary: chain = new BinaryBankDeserializer(CreateLittleBinaryInput(instream), inputName); break;
+						case IOFormat.BigBinary: chain = new BinaryBankDeserializer(CreateBigBinaryInput(instream), inputName); break;
 						default: mareep.WriteError("SHOCK: unimplemented input format '{0}'.", mInputFormat); break;
 					}
 
@@ -30,6 +34,7 @@ namespace arookas.shock {
 						case IOFormat.Xml: chain.AppendLink(new XmlBankSerializer(CreateXmlOutput(outstream))); break;
 						case IOFormat.LittleBinary: chain.AppendLink(new BinaryBankSerializer(CreateLittleBinaryOutput(outstream))); break;
 						case IOFormat.BigBinary: chain.AppendLink(new BinaryBankSerializer(CreateBigBinaryOutput(outstream))); break;
+						case IOFormat.SoundFont: chain.AppendLink(new SoundFontBankSerializer(CreateLittleBinaryOutput(outstream))); break;
 						default: mareep.WriteError("SHOCK: unimplemented output format '{0}'.", mOutputFormat); break;
 					}
 
@@ -130,9 +135,11 @@ namespace arookas {
 	class BinaryBankDeserializer : BinaryBankTransformer {
 
 		aBinaryReader mReader;
+		string mName;
 
-		public BinaryBankDeserializer(aBinaryReader reader) {
+		public BinaryBankDeserializer(aBinaryReader reader, string name) {
 			mReader = reader;
+			mName = name;
 		}
 
 		protected override InstrumentBank DoTransform(InstrumentBank obj) {
@@ -153,6 +160,8 @@ namespace arookas {
 			mareep.WriteMessage("IBNK: header found, size {0:F1} KB, virtual number {1}\n", ((double)size / 1024.0d), virtualNumber);
 
 			var bank = new InstrumentBank(virtualNumber, 256);
+			
+			bank.Name = mName;
 
 			mReader.Goto(32);
 
@@ -884,9 +893,11 @@ namespace arookas {
 	class XmlBankDeserializer : XmlBankTransformer {
 
 		xElement mRootElement;
+		string mName;
 
-		public XmlBankDeserializer(xElement element) {
+		public XmlBankDeserializer(xElement element, string name) {
 			mRootElement = element;
+			mName = name;
 		}
 
 		protected override InstrumentBank DoTransform(InstrumentBank obj) {
@@ -907,6 +918,7 @@ namespace arookas {
 			}
 
 			var bank = new InstrumentBank(virtualnumber, 256);
+			bank.Name = mName;
 			var warnings = mareep.WarningCount;
 
 			foreach (var element in mRootElement.Elements()) {
@@ -1461,4 +1473,507 @@ namespace arookas {
 		}
 	}
 
+	abstract class SoundFontBankTransformer : Transformer<InstrumentBank> {
+		protected List<Preset> mPresets;
+		protected List<Bag> mPresetBags;
+		protected List<GenList> mPresetGenerators;
+		protected List<SFInst> mInstruments;
+		protected List<Bag> mInstrumentBags;
+		protected List<GenList> mInstrumentGenerators;
+		
+		protected class Preset {
+			string mName;
+			short mPreset;
+			short mBank;
+			short mPresetBagIndex;
+			int mLibrary;
+			int mGenre;
+			int mMorphology;
+			
+			public Preset() {
+			}
+			
+			public Preset(string name, short preset, short bank, short presetBagIndex) {
+				mName = name;
+				mPreset = preset;
+				mBank = bank;
+				mPresetBagIndex = presetBagIndex;
+			}
+			
+			public void Read(aBinaryReader reader) {
+				mName = reader.ReadString(20);
+				mPreset = reader.ReadS16();
+				mBank = reader.ReadS16();
+				mPresetBagIndex = reader.ReadS16();
+				mLibrary = reader.ReadS32();
+				mGenre = reader.ReadS32();
+				mMorphology = reader.ReadS32();
+			}
+			
+			public void Write(aBinaryWriter writer) {
+				writer.WriteString(mName);
+				for (var j = mName.Length; j < 20; j++) writer.WriteS8(0);
+				writer.WriteS16(mPreset);
+				writer.WriteS16(mBank);
+				writer.WriteS16(mPresetBagIndex);
+				writer.WriteS32(mLibrary);
+				writer.WriteS32(mGenre);
+				writer.WriteS32(mMorphology);
+			}
+		}
+		
+		protected class Bag {
+			short mGenIndex;
+			short mModIndex;
+			
+			public Bag() {
+			}
+			
+			public Bag(short genIndex, short modIndex) {
+				mGenIndex = genIndex;
+				mModIndex = modIndex;
+			}
+			
+			public void Read(aBinaryReader reader) {
+				mGenIndex = reader.ReadS16();
+				mModIndex = reader.ReadS16();
+			}
+			
+			public void Write(aBinaryWriter writer) {
+				writer.WriteS16(mGenIndex);
+				writer.WriteS16(mModIndex);
+			}
+		}
+		
+		protected enum SFGenerator {
+			startAddrsOffset = 0,
+			endAddrsOffset = 1,
+			startloopAddrsOffset = 2,
+			endloopAddrsOffset = 3,
+			startAddrsCoarseOffset = 4,
+			modLfoToPitch = 5,
+			vibLfoToPitch = 6,
+			modEnvToPitch = 7,
+			initialFilterFc = 8,
+			initialFilterQ = 9,
+			modLfoToFilterFc = 10,
+			modEnvToFilterFc = 11,
+			endAddrsCoarseOffset = 12,
+			modLfoToVolume = 13,
+			unused1 = 14,
+			chorusEffectsSend = 15,
+			reverbEffectsSend = 16,
+			pan = 17,
+			unused2 = 18,
+			unused3 = 19,
+			unused4 = 20,
+			delayModLFO = 21,
+			freqModLFO = 22,
+			delayVibLFO = 23,
+			freqVibLFO = 24,
+			delayModEnv = 25,
+			attackModEnv = 26,
+			holdModEnv = 27,
+			decayModEnv = 28,
+			sustainModEnv = 29,
+			releaseModEnv = 30,
+			keynumToModEnvHold = 31,
+			keynumToModEnvDecay = 32,
+			delayVolEnv = 33,
+			attackVolEnv = 34,
+			holdVolEnv = 35,
+			decayVolEnv = 36,
+			sustainVolEnv = 37,
+			releaseVolEnv = 38,
+			keynumToVolEnvHold = 39,
+			keynumToVolEnvDecay = 40,
+			instrument = 41,
+			reserved1 = 42,
+			keyRange = 43,
+			velRange = 44,
+			startloopAddrsCoarseOffset = 45,
+			keynum = 46,
+			velocity = 47,
+			initialAttenuation = 48,
+			reserved2 = 49,
+			endloopAddrsCoarseOffset = 50,
+			coarseTune = 51,
+			fineTune = 52,
+			sampleID = 53,
+			sampleModes = 54,
+			reserved3 = 55,
+			scaleTuning = 56,
+			exclusiveClass = 57,
+			overridingRootKey = 58,
+			unused5 = 59,
+			endOper = 60
+		}
+		
+		protected class GenList {
+			SFGenerator mGenOper;
+			byte mRangeLo;
+			byte mRangeHi;
+			short mAmount;
+			
+			public GenList() {
+			}
+			
+			public GenList(SFGenerator genOper, short amount) {
+				mGenOper = genOper;
+				mAmount = amount;
+			}
+			
+			public GenList(SFGenerator genOper, byte lo, byte hi) {
+				mGenOper = genOper;
+				mRangeLo = lo;
+				mRangeHi = hi;
+			}
+			
+			public void Read(aBinaryReader reader) {
+				mGenOper = (SFGenerator)reader.ReadS16();
+				if (mGenOper == SFGenerator.keyRange || mGenOper == SFGenerator.velRange) {
+					mRangeLo = reader.Read8();
+					mRangeHi = reader.Read8();
+				}
+				else {
+					mAmount = reader.ReadS16();
+				}
+			}
+			
+			public void Write(aBinaryWriter writer) {
+				writer.WriteS16((short)mGenOper);
+				if (mGenOper == SFGenerator.keyRange || mGenOper == SFGenerator.velRange) {
+					writer.Write8(mRangeLo);
+					writer.Write8(mRangeHi);
+				}
+				else {
+					writer.WriteS16(mAmount);
+				}
+			}
+		}
+		
+		protected class SFInst {
+			string mName;
+			short mInstBagIndex;
+			
+			public SFInst() {
+			}
+			
+			public SFInst(string name, short bagIndex) {
+				mName = name;
+				mInstBagIndex = bagIndex;
+			}
+			
+			public void Read(aBinaryReader reader) {
+				mName = reader.ReadString(20);
+				mInstBagIndex = reader.ReadS16();
+			}
+			
+			public void Write(aBinaryWriter writer) {
+				writer.WriteString(mName);
+				for (var j = mName.Length; j < 20; j++) writer.WriteS8(0);
+				writer.WriteS16(mInstBagIndex);
+			}
+		}
+	}
+
+	class SoundFontBankSerializer : SoundFontBankTransformer {
+		aBinaryWriter mWriter;
+		InstrumentBank mBank;
+
+		public SoundFontBankSerializer(aBinaryWriter writer) {
+			mWriter = writer;
+		}
+
+		protected override InstrumentBank DoTransform(InstrumentBank obj) {
+			if (obj == null) {
+				return null;
+			}
+			
+			mBank = obj;
+			
+			mPresets = new List<Preset>();
+			mPresetBags = new List<Bag>();
+			mPresetGenerators = new List<GenList>();
+			mInstruments = new List<SFInst>();
+			mInstrumentBags = new List<Bag>();
+			mInstrumentGenerators = new List<GenList>();
+			for (var program = 0; program < mBank.Capacity; ++program) {
+				if (mBank[program] == null) {
+					continue;
+				}
+				AddInstrument(program);
+			}
+
+			mWriter.PushAnchor();
+
+			mWriter.WriteString("RIFF");
+			mWriter.WriteS32(CalculateInfoSize() + 8 + CalculateSmplSize() + 20 + CalculatePdtaSize() + 8 + 4);
+			mWriter.WriteString("sfbk");
+			
+			WriteInfo();
+			
+			WriteSdta();
+			
+			WritePdta();
+
+			mWriter.PopAnchor();
+
+			return obj;
+		}
+		
+		void AddInstrument(int program) {
+			var name = String.Format("{0:D5}-{1:D5}", mBank.VirtualNumber, program);
+			short bank;
+			if (mBank[program].Type == InstrumentType.DrumSet) {
+				bank = (short)128;
+			}
+			else {
+				bank = (short)mBank.VirtualNumber;
+			}
+			mPresets.Add(new Preset(name, (short)program, bank, (short)mPresetBags.Count));
+			mPresetBags.Add(new Bag((short)mPresetGenerators.Count, 0));
+			mPresetBags.Add(new Bag((short)mPresetGenerators.Count, 0));
+			mPresetGenerators.Add(new GenList(SFGenerator.keyRange, 0, 127));
+			mPresetGenerators.Add(new GenList(SFGenerator.instrument, (short)mInstruments.Count));
+			
+			mInstruments.Add(new SFInst(name, (short)mInstrumentBags.Count));
+			switch (mBank[program].Type) {
+			case InstrumentType.Melodic:
+				AddMelodic((MelodicInstrument)mBank[program]);
+				break;
+			case InstrumentType.DrumSet:
+				AddDrumset((DrumSet)mBank[program]);
+				break;
+			}
+		}
+		
+		short AmplitudeToCentibel(double vol) {
+			double power = vol*vol;
+			double decibel = 10.0*System.Math.Log10(power);
+			return (short)(decibel*-10.0);
+		}
+		
+		short PitchToCents(double pitch) {
+			double cents = 1200.0*System.Math.Log(pitch, 2.0);
+			return (short)(cents);
+		}
+		
+		void AddMelodic(MelodicInstrument inst) {
+			mInstrumentBags.Add(new Bag((short)mInstrumentGenerators.Count, 0));
+			mInstrumentBags.Add(new Bag((short)mInstrumentGenerators.Count, 0));
+			mInstrumentBags.Add(new Bag((short)mInstrumentGenerators.Count, 0));
+			
+			foreach (InstrumentOscillatorInfo osc in inst.Oscillators) {
+				if (osc.Target != InstrumentEffectTarget.Volume) {
+					continue;
+				}
+				if (osc.StartTableCount > 0 && osc.GetStartTable(0).time > 0) {
+					// can only determine attack time
+					mInstrumentBags.Add(new Bag((short)mInstrumentGenerators.Count, 0));
+				}
+				if (osc.StartTableCount > 1 && osc.GetStartTable(1).time > 0) {
+					// can determine decay time
+					mInstrumentBags.Add(new Bag((short)mInstrumentGenerators.Count, 0));
+				}
+				if (osc.StartTableCount > 1 && osc.GetStartTable(1).amount + osc.Base > 0) {
+					// sustain volume
+					mInstrumentBags.Add(new Bag((short)mInstrumentGenerators.Count, 0));
+				}
+				if (osc.ReleaseTableCount > 0 && osc.GetReleaseTable(0).time > 0) {
+					// release time
+					mInstrumentBags.Add(new Bag((short)mInstrumentGenerators.Count, 0));
+				}
+			}
+			
+			mInstrumentGenerators.Add(new GenList(SFGenerator.initialAttenuation, AmplitudeToCentibel(inst.Volume)));
+			mInstrumentGenerators.Add(new GenList(SFGenerator.fineTune, PitchToCents(inst.Pitch)));
+			mInstrumentGenerators.Add(new GenList(SFGenerator.sampleModes, 1));
+			
+			foreach (InstrumentOscillatorInfo osc in inst.Oscillators) {
+				if (osc.Target != InstrumentEffectTarget.Volume) {
+					continue;
+				}
+				if (osc.StartTableCount > 0 && osc.GetStartTable(0).time > 0) {
+					// can only determine attack time
+					double attackSeconds = (double)(osc.GetStartTable(0).time)*(double)osc.Rate/600.0;
+					mInstrumentGenerators.Add(new GenList(SFGenerator.attackVolEnv, PitchToCents(attackSeconds)));
+				}
+				if (osc.StartTableCount > 1 && osc.GetStartTable(1).time > 0) {
+					// can determine decay time
+					double decaySeconds = (double)(osc.GetStartTable(1).time)*(double)osc.Rate/600.0;
+					mInstrumentGenerators.Add(new GenList(SFGenerator.decayVolEnv, PitchToCents(decaySeconds)));
+				}
+				if (osc.StartTableCount > 1 && osc.GetStartTable(1).amount + osc.Base > 0) {
+					// sustain volume
+					double sustain = ((double)(osc.GetStartTable(1).amount)/32767.0*(double)osc.Width) + (double)osc.Base;
+					mInstrumentGenerators.Add(new GenList(SFGenerator.sustainVolEnv, AmplitudeToCentibel(sustain)));
+				}
+				if (osc.ReleaseTableCount > 0 && osc.GetReleaseTable(0).time > 0) {
+					// release time
+					double releaseSeconds = (double)(osc.GetReleaseTable(0).time)*(double)osc.Rate/600.0;
+					mInstrumentGenerators.Add(new GenList(SFGenerator.releaseVolEnv, PitchToCents(releaseSeconds)));
+				}
+			}
+			
+			int lastKey = 0;
+			foreach (MelodicKeyRegion keyRegion in inst) {
+				int lastVel = 0;
+				foreach (InstrumentVelocityRegion velRegion in keyRegion) {
+					mInstrumentBags.Add(new Bag((short)mInstrumentGenerators.Count, 0));
+					mInstrumentBags.Add(new Bag((short)mInstrumentGenerators.Count, 0));
+					mInstrumentBags.Add(new Bag((short)mInstrumentGenerators.Count, 0));
+					mInstrumentBags.Add(new Bag((short)mInstrumentGenerators.Count, 0));
+					mInstrumentBags.Add(new Bag((short)mInstrumentGenerators.Count, 0));
+
+					mInstrumentGenerators.Add(new GenList(SFGenerator.keyRange, (byte)lastKey, (byte)keyRegion.Key));
+					mInstrumentGenerators.Add(new GenList(SFGenerator.velRange, (byte)lastVel, (byte)velRegion.Velocity));
+					mInstrumentGenerators.Add(new GenList(SFGenerator.initialAttenuation, AmplitudeToCentibel(velRegion.Volume)));
+					mInstrumentGenerators.Add(new GenList(SFGenerator.fineTune, PitchToCents(velRegion.Pitch)));
+					mInstrumentGenerators.Add(new GenList(SFGenerator.sampleID, (short)(velRegion.WaveId)));
+					lastVel = velRegion.Velocity+1;
+				}
+				lastKey = keyRegion.Key+1;
+			}
+		}
+		
+		void AddDrumset(DrumSet drums) {
+			foreach (Percussion perc in drums) {
+				if (perc == null) {
+					continue;
+				}
+				int lastVel = 0;
+				foreach (InstrumentVelocityRegion velRegion in perc) {
+					mInstrumentBags.Add(new Bag((short)mInstrumentGenerators.Count, 0));
+					mInstrumentBags.Add(new Bag((short)mInstrumentGenerators.Count, 0));
+					mInstrumentBags.Add(new Bag((short)mInstrumentGenerators.Count, 0));
+					mInstrumentBags.Add(new Bag((short)mInstrumentGenerators.Count, 0));
+					mInstrumentBags.Add(new Bag((short)mInstrumentGenerators.Count, 0));
+					mInstrumentBags.Add(new Bag((short)mInstrumentGenerators.Count, 0));
+					mInstrumentBags.Add(new Bag((short)mInstrumentGenerators.Count, 0));
+					mInstrumentBags.Add(new Bag((short)mInstrumentGenerators.Count, 0));
+
+					mInstrumentGenerators.Add(new GenList(SFGenerator.keyRange, (byte)perc.Key, (byte)perc.Key));
+					mInstrumentGenerators.Add(new GenList(SFGenerator.velRange, (byte)lastVel, (byte)velRegion.Velocity));
+					mInstrumentGenerators.Add(new GenList(SFGenerator.initialAttenuation, AmplitudeToCentibel(velRegion.Volume*perc.Volume)));
+					mInstrumentGenerators.Add(new GenList(SFGenerator.fineTune, PitchToCents(velRegion.Pitch*perc.Pitch)));
+					mInstrumentGenerators.Add(new GenList(SFGenerator.pan, (short)((perc.Pan-0.5f)*1000.0f)));
+					mInstrumentGenerators.Add(new GenList(SFGenerator.releaseVolEnv, PitchToCents(perc.Release/32767.0)));
+					mInstrumentGenerators.Add(new GenList(SFGenerator.overridingRootKey, (short)perc.Key));
+					mInstrumentGenerators.Add(new GenList(SFGenerator.sampleID, (short)(velRegion.WaveId)));
+					lastVel = velRegion.Velocity+1;
+				}
+			}
+		}
+		
+		void WriteInfo() {
+			mWriter.WriteString("LIST");
+			mWriter.WriteS32(CalculateInfoSize());
+			
+			mWriter.WriteString("INFO");
+			
+			mWriter.WriteString("ifil");
+			mWriter.WriteS32(4);
+			mWriter.WriteS16(2);
+			mWriter.WriteS16(1);
+			
+			mWriter.WriteString("isng");
+			mWriter.WriteS32(8);
+			mWriter.WriteString("EMU8000");
+			mWriter.WriteS8(0);
+			
+			mWriter.WriteString("INAM");
+			mWriter.WriteS32(((mBank.Name.Length + 2) / 2) * 2);
+			mWriter.WriteString(mBank.Name);
+			mWriter.WriteS8(0);
+			mWriter.WritePadding(2, 0);
+		}
+		
+		int CalculateInfoSize() {
+			return 4 + 12 + 16 + 8 + (((mBank.Name.Length + 2) / 2) * 2);
+		}
+		
+		void WriteSdta() {
+			mWriter.WriteString("LIST");
+			mWriter.WriteS32(CalculateSmplSize() + 12);
+			
+			mWriter.WriteString("sdta");
+			
+			mWriter.WriteString("smpl");
+			mWriter.WriteS32(CalculateSmplSize());
+		}
+		
+		int CalculateSmplSize() {
+			return 0;
+		}
+		
+		void WritePdta() {
+			mWriter.WriteString("LIST");
+			mWriter.WriteS32(CalculatePdtaSize());
+			
+			mWriter.WriteString("pdta");
+			
+			mWriter.WriteString("phdr");
+			mWriter.WriteS32(38 + 38*mPresets.Count);
+			foreach (Preset preset in mPresets) preset.Write(mWriter);
+			mWriter.WriteString("EOP");
+			for (var i = 0; i < 21; i++) mWriter.WriteS8(0);
+			mWriter.WriteS16((short)mPresetBags.Count);
+			for (var i = 0; i < 12; i++) mWriter.WriteS8(0);
+			
+			mWriter.WriteString("pbag");
+			mWriter.WriteS32(4 + 4*mPresetBags.Count);
+			foreach (Bag bag in mPresetBags) bag.Write(mWriter);
+			mWriter.WriteS16((short)mPresetGenerators.Count);
+			mWriter.WriteS16((short)0);
+			
+			mWriter.WriteString("pmod");
+			mWriter.WriteS32(10);
+			for (var i = 0; i < 10; i++) mWriter.WriteS8(0);
+			
+			mWriter.WriteString("pgen");
+			mWriter.WriteS32(4 + 4*mPresetGenerators.Count);
+			foreach (GenList gen in mPresetGenerators) gen.Write(mWriter);
+			mWriter.WriteS32(0);
+			
+			mWriter.WriteString("inst");
+			mWriter.WriteS32(22 + 22*mInstruments.Count);
+			foreach (SFInst inst in mInstruments) inst.Write(mWriter);
+			mWriter.WriteString("EOI");
+			for (var i = 0; i < 19; i++) mWriter.WriteS8(0);
+			
+			mWriter.WriteString("ibag");
+			mWriter.WriteS32(4 + 4*mInstrumentBags.Count);
+			foreach (Bag bag in mInstrumentBags) bag.Write(mWriter);
+			mWriter.WriteS16(0);
+			mWriter.WriteS16(0);
+			
+			mWriter.WriteString("imod");
+			mWriter.WriteS32(10);
+			for (var i = 0; i < 10; i++) mWriter.WriteS8(0);
+			
+			mWriter.WriteString("igen");
+			mWriter.WriteS32(4 + 4*mInstrumentGenerators.Count);
+			foreach (GenList gen in mInstrumentGenerators) gen.Write(mWriter);
+			mWriter.WriteS32(0);
+			
+			mWriter.WriteString("shdr");
+			mWriter.WriteS32(46);
+			mWriter.WriteString("EOS");
+			for (var i = 0; i < 43; i++) mWriter.WriteS8(0);
+		}
+		
+		int CalculatePdtaSize() {
+			return 4 +
+				46 + 38*mPresets.Count + // phdr
+				12 + 4*mPresetBags.Count + // pbag
+				18 + // pmod
+				12 + 4*mPresetGenerators.Count + // pgen
+				30 + 22*mInstruments.Count + // inst
+				12 + 4*mInstrumentBags.Count + // ibag
+				18 + // imod
+				12 + 4*mInstrumentGenerators.Count + // igen
+				54; // shdr
+		}
+	}
 }
