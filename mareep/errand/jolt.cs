@@ -33,7 +33,6 @@ namespace arookas.jolt {
 		public void LoadParams(string[] arguments) {
 			var cmdline = new aCommandLine(arguments);
 			aCommandLineParameter parameter;
-
 			parameter = mareep.GetLastCmdParam(cmdline, "-input");
 
 			if (parameter == null) {
@@ -43,7 +42,6 @@ namespace arookas.jolt {
 			}
 
 			mInput = parameter[0];
-
 			parameter = mareep.GetLastCmdParam(cmdline, "-output");
 
 			if (parameter == null) {
@@ -53,20 +51,19 @@ namespace arookas.jolt {
 			}
 
 			mOutput = parameter[0];
-
 			parameter = mareep.GetLastCmdParam(cmdline, "-loop");
 
 			if (parameter != null) {
-				if (parameter.Count == 0) {
-					mLoop = 0;
-					mLoopTimeUnit = LoopTimeUnit.Pulses;
+				mLoop = 0;
+				mLoopTimeUnit = LoopTimeUnit.Pulses;
+
+				if (parameter.Count >= 1) {
+					if (!Int64.TryParse(parameter[0], NumberStyles.None, null, out mLoop)) {
+						mareep.WriteError("JOLT: bad loop value '{0}'.", parameter[0]);
+					}
 				}
 
-				if (parameter.Count > 0 && !Int64.TryParse(parameter[0], NumberStyles.None, null, out mLoop)) {
-					mareep.WriteError("JOLT: bad loop value '{0}'.", parameter[0]);
-				}
-
-				if (parameter.Count > 1) {
+				if (parameter.Count >= 2) {
 					switch (parameter[1].ToLowerInvariant()) {
 						case "pulses":
 						case "ticks": {
@@ -83,10 +80,23 @@ namespace arookas.jolt {
 							mLoopTimeUnit = LoopTimeUnit.Measures;
 							break;
 						}
-						default: mareep.WriteError("JOLT: bad time unit '{0}'.", parameter[1]); break;
+						default: {
+							mareep.WriteError("JOLT: bad time unit '{0}'.", parameter[1]);
+							break;
+						}
 					}
 				}
 			}
+		}
+
+		public void ShowUsage() {
+			mareep.WriteMessage("USAGE: jolt -input <file> -output <file> [...]\n");
+			mareep.WriteMessage("\n");
+			mareep.WriteMessage("OPTIONS:\n");
+			mareep.WriteMessage("  -loop [<amount> [<unit>]]\n");
+			mareep.WriteMessage("    Specifies the song should loop from the end. <amount>\n");
+			mareep.WriteMessage("    and <unit> specify the beginning of the loop; if omitted,\n");
+			mareep.WriteMessage("    the entire song will loop front-to-back.\n");
 		}
 
 		public void Perform() {
@@ -235,10 +245,12 @@ namespace arookas.jolt {
 				ReadNoteOff(time, ev);
 			}
 		}
+
 		void ReadNoteOff(long time, EventInfo ev) {
 			mChannelTracks[ev.channel].AddNoteOff(time, ev.key);
 			mChannelOpen[ev.channel] = true;
 		}
+
 		void ReadControlChange(long time, EventInfo ev) {
 			var open = true;
 
@@ -251,6 +263,7 @@ namespace arookas.jolt {
 
 			mChannelOpen[ev.channel] |= open;
 		}
+
 		void ReadProgramChange(long time, EventInfo ev) {
 			var program = ev.program;
 			if (ev.channel == 10) {
@@ -259,10 +272,12 @@ namespace arookas.jolt {
 			mChannelTracks[ev.channel].AddEvent(time, "load rprogram, {0}b", program);
 			mChannelOpen[ev.channel] = true;
 		}
+
 		void ReadPitchWheel(long time, EventInfo ev) {
 			mChannelTracks[ev.channel].AddEvent(time, "timedparam 1, {0}h", (ev.pitch - 8192));
 			mChannelOpen[ev.channel] = true;
 		}
+
 		void ReadTempo(long time, EventInfo ev) {
 			mRootTrack.AddEvent(time, "tempo {0}h", (60000000 / ev.tempo));
 		}
@@ -300,6 +315,7 @@ namespace arookas.jolt {
 		public bool AddNoteOn(int key, int velocity) {
 			return AddNoteOn(Duration, key, velocity);
 		}
+
 		public bool AddNoteOn(long time, int key, int velocity) {
 			for (var i = 0; i < mActiveNotes.Length; ++i) {
 				if (mActiveNotes[i] < 0 || mActiveNotes[i] == key) {
@@ -310,9 +326,11 @@ namespace arookas.jolt {
 			}
 			return false;
 		}
+
 		public bool AddNoteOff(int key) {
 			return AddNoteOff(Duration, key);
 		}
+
 		public bool AddNoteOff(long time, int key) {
 			for (var i = 0; i < 7; ++i) {
 				if (mActiveNotes[i] == key) {
@@ -323,18 +341,23 @@ namespace arookas.jolt {
 			}
 			return false;
 		}
+
 		public void AddEvent(string message) {
 			AddEvent(Duration, message);
 		}
+
 		public void AddEvent(long time, string message) {
 			AddEvent(new Event(time, message));
 		}
+
 		public void AddEvent(string format, params object[] arguments) {
 			AddEvent(Duration, format, arguments);
 		}
+
 		public void AddEvent(long time, string format, params object[] arguments) {
 			AddEvent(new Event(time, format, arguments));
 		}
+
 		void AddEvent(Event ev) {
 			int i;
 			for (i = 0; i < mEvents.Count; ++i) {
@@ -353,6 +376,7 @@ namespace arookas.jolt {
 				time = ev.Time;
 			}
 		}
+
 		void WriteWait(long delta, TextWriter writer) {
 			while (delta > 0) {
 				var delay = System.Math.Min(delta, 0xFFFFFF);
@@ -375,6 +399,7 @@ namespace arookas.jolt {
 			public long Time { get { return mTime; } }
 
 			public Event(long time, string message) : this(time, "{0}", message) { }
+
 			public Event(long time, string format, params object[] arguments) {
 				mTime = time;
 				mText = String.Format(format, arguments);
