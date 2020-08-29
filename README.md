@@ -1,15 +1,15 @@
 
-## flaaffy v.0.6.1
+## SMSAudioTool(SMSAudioTool(Flaaffy v.0.6.1) v.0.6.1)
 
 ### Summary
 
-_flaaffy_ is a simple audio toolchain for Super Mario Sunshine.
+_SMSAudioTool(Flaaffy v.0.6.1)_ is a simple audio toolchain for Super Mario Sunshine.
 At its core, it is a runtime library for loading, utilizing, and playing the various audio-related formats of the game.
 There are also a series of tools and utilities to convert and create these formats.
 
 ### Compiling
 
-To compile _flaaffy_, you'll need to have the following libraries compiled and/or installed:
+To compile _SMSAudioTool(Flaaffy v.0.6.1)_, you'll need to have the following libraries compiled and/or installed:
 
 - [arookas library](http://github.com/arookas/arookas)
 
@@ -20,16 +20,16 @@ Simply run the script with premake5 and build the resulting solution.
 
 ## Usage
 
-As of now, _flaaffy_ toolkit contains a swiss-army-knife utility program called _mareep_.
+As of now, _SMSAudioTool(Flaaffy v.0.6.1)_ toolkit contains a swiss-army-knife utility program called _SMSAudioTool(Flaaffy v.0.6.1)_.
 
-### mareep
+### SMSAudioTool(Flaaffy v.0.6.1)
 
-_mareep_ is utility program able to convert many audio-related formats.
+_SMSAudioTool(Flaaffy v.0.6.1)_ is utility program able to convert many audio-related formats.
 It is a command-line interface, where each feature is implemented as an "errand".
 The arguments follow this format:
 
 ```
-mareep [-help] -errand <errand> [...]
+SMSAudioTool [-help] -errand <errand> [...]
 ```
 
 You may specify the `-help` parameter to show brief documentation for a given errand.
