@@ -37,9 +37,9 @@ The available errands are as follows:
 
 |Errand|Description|
 |-------|-----------|
-|[shock](shock.md)|Converts banks ("IBNK" or "bnk") to&#8209;and&#8209;fro XML and binary formats. Little&#8209;endian and big&#8209;endian are supported.|
-|[whap](whap.md)|Converts wave banks ("WSYS" or "ws") to&#8209;and&#8209;fro XML and binary formats. Little&#8209;endian and big&#8209;endian are supported. Automatically extracts and repacks wave archives (.aw files). Includes PCM&nbsp;⇄&nbsp;ADPCM conversion.|
-|[wave](wave.md)|Standalone errand to convert audio data between formats. Various raw and standard formats are supported.|
-|[cotton](cotton.md)|A dedicated BMS assembler. Able to compile BMS files from no&#8209;holds&#8209;barred assembly text. Features relocation, named labels, variables, embedded POD, and various other directives.|
-|[jolt](jolt.md)|Converts basic MIDI files to the cotton assembler language. Used to create custom music.|
-|[charge](charge.md)|Basic utility to extract and replace data (sequences, banks, and wave banks) inside an AAF file.|
+|[IBNK](IBNK.md)|Converts banks ("IBNK" or "bnk") to&#8209;and&#8209;fro XML and binary formats. Little&#8209;endian and big&#8209;endian are supported.|
+|[WSYS](WSYS.md)|Converts WAVE banks ("WSYS" or "ws") to&#8209;and&#8209;fro XML and binary formats. Little&#8209;endian and big&#8209;endian are supported. Automatically extracts and repacks WAVE archives (.aw files). Includes PCM&nbsp;⇄&nbsp;ADPCM conversion.|
+|[WAVE](WAVE.md)|Standalone errand to convert audio data between formats. Various raw and standard formats are supported.|
+|[BMS](BMS.md)|A dedicated BMS assembler. Able to compile BMS files from no&#8209;holds&#8209;barred assembly text. Features relocation, named labels, variables, embedded POD, and various other directives.|
+|[MIDI](MIDI.md)|Converts basic MIDI files to the BMS assembler language. Used to create custom music.|
+|[DataSEQ](DataSEQ.md)|Basic utility to extract and replace data (sequences, banks, and WAVE banks) inside an AAF file.|

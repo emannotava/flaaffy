@@ -2,7 +2,7 @@
 workspace "flaaffy"
 configurations { "Debug", "Release" }
 targetdir "bin/%{cfg.buildcfg}"
-startproject "mareep"
+startproject "SMSAudioClass"
 
 filter "configurations:Debug"
 defines { "DEBUG" }
@@ -12,13 +12,13 @@ filter "configurations:Release"
 defines { "RELEASE" }
 optimize "On"
 
-project "mareep"
+project "SMSAudioTool"
 kind "ConsoleApp"
 language "C#"
 namespace "arookas"
-location "mareep"
-entrypoint "arookas.mareep"
-targetname "mareep"
+location "SMSAudioTool"
+entrypoint "arookas.SMSAudioTool"
+targetname "SMSAudioTool"
 framework "4.6.1"
 
 links {
@@ -30,10 +30,10 @@ links {
 }
 
 files {
-	"mareep/**.cs",
+	"SMSAudioClass/**.cs",
 }
 
 excludes {
-	"mareep/bin/**",
-	"mareep/obj/**",
+	"SMSAudioClass/bin/**",
+	"SMSAudioClass/obj/**",
 }
