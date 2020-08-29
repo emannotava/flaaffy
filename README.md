@@ -1,5 +1,5 @@
 
-## SMSAudioTool(SMSAudioTool(Flaaffy v.0.6.1) v.0.6.1)
+## SMSAudioTool(SMSAudioTool(Flaaffy v.0.6.1)
 
 ### Summary
 
